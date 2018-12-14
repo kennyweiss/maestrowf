@@ -649,7 +649,10 @@ class FluxScriptAdapter(SchedulerScriptAdapter):
             #   },
         }
         LOGGER.debug("Submission Spec -- \n%s", jobspec)
-        jobspec["cmdline"] = ["flux", "broker", path]
+        if step.run["nodes"] > 1:
+            jobspec["cmdline"] = ["flux", "broker", path]
+        else:
+            jobspec["cmdline"] = [path]
 
         if self.h is None:
             self.h = self.flux.Flux()
