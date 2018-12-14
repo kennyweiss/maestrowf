@@ -33,6 +33,7 @@ import logging
 import os
 import re
 import json
+import stat
 import subprocess as sp
 
 from maestrowf.abstracts.interfaces import SchedulerScriptAdapter
@@ -863,6 +864,7 @@ class FluxScriptAdapter(SchedulerScriptAdapter):
             script.write(cmd)
 
         if to_be_scheduled:
+            os.chmod(script_path, st.st_mode | stat.S_IXUSR)
             w_script = os.path.join(
                 ws_path,
                 "{}.wrapper.sh".format(step.name)
@@ -891,6 +893,7 @@ class FluxScriptAdapter(SchedulerScriptAdapter):
                 script.write(cmd)
 
             if to_be_scheduled:
+                os.chmod(script_path, st.st_mode | stat.S_IXUSR)
                 w_script = os.path.join(
                     ws_path,
                     "{}.wrapper.sh".format(step.name)
