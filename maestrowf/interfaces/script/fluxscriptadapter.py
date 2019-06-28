@@ -39,6 +39,8 @@ import subprocess as sp
 from maestrowf.abstracts.interfaces import SchedulerScriptAdapter
 from maestrowf.abstracts.enums import JobStatusCode, State, SubmissionCode, \
     CancelCode
+from maestrowf.interfaces.script import CancellationRecord, SubmissionRecord
+
 
 LOGGER = logging.getLogger(__name__)
 status_re = re.compile(r"Job \d+ status: (.*)$")
@@ -246,28 +248,37 @@ class SpectrumFluxScriptAdapter(SchedulerScriptAdapter):
             #     },
             #   },
         }
+
         LOGGER.debug("Submission Spec -- \n%s", jobspec)
+
         if step.run["nodes"] > 1:
             jobspec["cmdline"] = ["flux", "broker", path]
         else:
             jobspec["cmdline"] = [path]
         if self.h is None:
             self.h = self.flux.Flux()
+        
+        # Send the job specification through the Flux Python API.
         resp = self.h.rpc_send("job.submit", json.dumps(jobspec))
+
+        # Set the return code and submission code based on the response.
+        sub_code, ret_code = SubmissionCode.ERROR, -1
         if resp is None:
             LOGGER.warning("RPC response invalid")
-            return SubmissionCode.ERROR, -1
         if resp.get("errnum", None) is not None:
             LOGGER.warning("Job creation failed with error code {}".format(
                 resp["errnum"]))
-            return SubmissionCode.ERROR, -1
         if resp.get("state", None) != "submitted":
             LOGGER.warning("Job creation failed")
-            return SubmissionCode.ERROR, -1
+        else:
+            LOGGER.info("Submission returned status OK. -- "
+                        "Assigned identifier (%s)", resp["jobid"])
+            # We succeeded in submission here, set the codes appropriately.
+            sub_code, ret_code = SubmissionCode.OK, resp["jobid"]
 
-        LOGGER.info("Submission returned status OK. -- "
-                    "Assigned identifier (%s)", resp["jobid"])
-        return SubmissionCode.OK, resp["jobid"]
+        # Populate a SubmissionRecord to return.
+        sub_record = SubmissionRecord(sub_code, ret_code)
+        return sub_record
 
     def check_jobs(self, joblist):
         """
@@ -304,8 +315,8 @@ class SpectrumFluxScriptAdapter(SchedulerScriptAdapter):
         status = {}
         for jobid in joblist:
             status[jobid] = None
-        for i in range(0, len(joblist)):
-            jobid = joblist[i]
+
+        for i, jobid in enumerate(joblist):
             path = paths[i]
             LOGGER.debug("Checking jobid %s", jobid)
             try:
