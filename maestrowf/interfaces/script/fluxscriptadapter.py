@@ -33,7 +33,6 @@ import logging
 import os
 import re
 import json
-import stat
 import subprocess as sp
 
 from maestrowf.abstracts.interfaces import SchedulerScriptAdapter
@@ -43,16 +42,15 @@ from maestrowf.interfaces.script import CancellationRecord, SubmissionRecord
 
 
 LOGGER = logging.getLogger(__name__)
-status_re = re.compile(r"Job \d+ status: (.*)$")
 # env_filter = re.compile(r"^(SSH_|LSF)")
-env_filter = re.compile(r"^SSH_")
+ENV_FILTER = re.compile(r"^SSH_")
 
 
 def get_environment():
     """Filter environment variables based on a naming filter."""
     env = dict()
     for key in os.environ:
-        if env_filter.match(key):
+        if ENV_FILTER.match(key):
             continue
         env[key] = os.environ[key]
     env.pop("HOSTNAME", None)
@@ -112,9 +110,9 @@ class SpectrumFluxScriptAdapter(SchedulerScriptAdapter):
 
     def _convert_walltime_to_seconds(self, walltime):
         # Convert walltime to seconds.
-        wt = \
+        wall_time = \
             (datetime.strptime(walltime, "%H:%M:%S") - datetime(1900, 1, 1))
-        return int(wt.total_seconds())
+        return int(wall_time.total_seconds())
 
     def get_header(self, step):
         """
@@ -265,10 +263,10 @@ class SpectrumFluxScriptAdapter(SchedulerScriptAdapter):
         sub_code, ret_code = SubmissionCode.ERROR, -1
         if resp is None:
             LOGGER.warning("RPC response invalid")
-        if resp.get("errnum", None) is not None:
-            LOGGER.warning("Job creation failed with error code {}".format(
-                resp["errnum"]))
-        if resp.get("state", None) != "submitted":
+        elif resp.get("errnum", None) is not None:
+            LOGGER.warning(
+                "Job creation failed with error code %s", resp["errnum"])
+        elif resp.get("state", None) != "submitted":
             LOGGER.warning("Job creation failed")
         else:
             LOGGER.info("Submission returned status OK. -- "
@@ -361,8 +359,8 @@ class SpectrumFluxScriptAdapter(SchedulerScriptAdapter):
                 )
             except IOError:
                 LOGGER.error(
-                    "Error seen on path {} Unexpected behavior encountered."
-                    .format(path)
+                    "Error seen on path %s Unexpected behavior encountered.",
+                    path
                 )
                 # NOTE: I don't know if we should actually be returning here.
                 # It feels like we may not want to.
@@ -389,6 +387,7 @@ class SpectrumFluxScriptAdapter(SchedulerScriptAdapter):
             return CancelCode.OK
 
         cancelcode = CancelCode.OK
+        retcode = 0
 
         term_status = set([State.FINISHED, State.CANCELLED, State.FAILED])
         with open(os.devnull, "w") as FNULL:
@@ -416,7 +415,8 @@ class SpectrumFluxScriptAdapter(SchedulerScriptAdapter):
                     LOGGER.warning("Error code '{}' seen. Unexpected behavior "
                                    "encountered.".format(retcode))
                     cancelcode = CancelCode.ERROR
-        return cancelcode
+
+        return CancellationRecord(cancelcode, retcode)
 
     def _state(self, flux_state):
         """
@@ -428,21 +428,21 @@ class SpectrumFluxScriptAdapter(SchedulerScriptAdapter):
         LOGGER.debug("Received FLUX State -- %s", flux_state)
         if flux_state == "running":
             return State.RUNNING
-        elif flux_state == "pending" or flux_state == "runrequest" \
+        if flux_state == "pending" or flux_state == "runrequest" \
                 or flux_state == "allocated" or flux_state == "starting":
             return State.PENDING
-        elif flux_state == "submitted":
+        if flux_state == "submitted":
             return State.WAITING
-        elif flux_state == "failed":
+        if flux_state == "failed":
             return State.FAILED
-        elif flux_state == "cancelled" or flux_state == "killed":
+        if flux_state == "cancelled" or flux_state == "killed":
             return State.CANCELLED
-        elif flux_state == "complete":
+        if flux_state == "complete":
             return State.FINISHED
-        elif flux_state == "unknown":
+        if flux_state == "unknown":
             return State.UNKNOWN
-        else:
-            return State.UNKNOWN
+     
+        return State.UNKNOWN
 
     def _write_script(self, ws_path, step):
         """
@@ -677,21 +677,23 @@ class FluxScriptAdapter(SchedulerScriptAdapter):
 
         if self.h is None:
             self.h = self.flux.Flux()
+
         resp = self.h.rpc_send("job.submit", json.dumps(jobspec))
+        submit_code, jobid = SubmissionCode.ERROR, -1
+
         if resp is None:
             LOGGER.warning("RPC response invalid")
-            return SubmissionCode.ERROR, -1
-        if resp.get("errnum", None) is not None:
-            LOGGER.warning("Job creation failed with error code {}".format(
-                resp["errnum"]))
-            return SubmissionCode.ERROR, -1
-        if resp.get("state", None) != "submitted":
+        elif resp.get("errnum", None) is not None:
+            LOGGER.warning(
+                "Job creation failed with error code %s", resp["errnum"])
+        elif resp.get("state", None) != "submitted":
             LOGGER.warning("Job creation failed")
-            return SubmissionCode.ERROR, -1
+        else:
+            LOGGER.info("Submission returned status OK. -- "
+                        "Assigned identifier (%s)", resp["jobid"])
+            submit_code, jobid = SubmissionCode.OK, resp["jobid"]
 
-        LOGGER.info("Submission returned status OK. -- "
-                    "Assigned identifier (%s)", resp["jobid"])
-        return SubmissionCode.OK, resp["jobid"]
+        return SubmissionRecord(submit_code, jobid)
 
     def check_jobs(self, joblist):
         """
@@ -728,7 +730,8 @@ class FluxScriptAdapter(SchedulerScriptAdapter):
         status = {}
         for jobid in joblist:
             status[jobid] = None
-        for i in range(0, len(joblist)):
+
+        for i, jobid in enumerate(joblist):
             jobid = joblist[i]
             path = paths[i]
             LOGGER.debug("Checking jobid %s", jobid)
@@ -802,6 +805,7 @@ class FluxScriptAdapter(SchedulerScriptAdapter):
             return CancelCode.OK
 
         cancelcode = CancelCode.OK
+        retcode = 0
 
         term_status = set([State.FINISHED, State.CANCELLED, State.FAILED])
         with open(os.devnull, "w") as FNULL:
@@ -829,7 +833,8 @@ class FluxScriptAdapter(SchedulerScriptAdapter):
                     LOGGER.warning("Error code '{}' seen. Unexpected behavior "
                                    "encountered.".format(retcode))
                     cancelcode = CancelCode.ERROR
-        return cancelcode
+
+        return CancellationRecord(cancelcode, retcode)
 
     def _state(self, flux_state):
         """
@@ -841,21 +846,21 @@ class FluxScriptAdapter(SchedulerScriptAdapter):
         LOGGER.debug("Received FLUX State -- %s", flux_state)
         if flux_state == "running":
             return State.RUNNING
-        elif flux_state == "pending" or flux_state == "runrequest" \
+        if flux_state == "pending" or flux_state == "runrequest" \
                 or flux_state == "allocated" or flux_state == "starting":
             return State.PENDING
-        elif flux_state == "submitted":
+        if flux_state == "submitted":
             return State.WAITING
-        elif flux_state == "failed":
+        if flux_state == "failed":
             return State.FAILED
-        elif flux_state == "cancelled" or flux_state == "killed":
+        if flux_state == "cancelled" or flux_state == "killed":
             return State.CANCELLED
-        elif flux_state == "complete":
+        if flux_state == "complete":
             return State.FINISHED
-        elif flux_state == "unknown":
+        if flux_state == "unknown":
             return State.UNKNOWN
-        else:
-            return State.UNKNOWN
+        
+        return State.UNKNOWN
 
     def _write_script(self, ws_path, step):
         """
