@@ -31,6 +31,8 @@
 from abc import ABCMeta, abstractmethod
 import logging
 import os
+import stat
+
 import six
 
 
@@ -59,7 +61,11 @@ class ScriptAdapter(object):
 
         :param kwargs: The key value arguments for the ScriptAdapter instance.
         """
-        self._exec = os.path.join("#!", kwargs.pop("shell", "/bin/bash"))
+        self._exec = kwargs.pop("shell", "/bin/bash")
+        if not os.path.exists(self._exec):
+            raise ValueError("Specified shell '{}' does not exists. Exiting.")
+
+        self._exec = "#!{}".format(self._exec)
         LOGGER.debug("Shell set to '%s'.", self._exec)
 
     @abstractmethod
