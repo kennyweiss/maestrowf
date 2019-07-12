@@ -81,14 +81,14 @@ class LocalScriptAdapter(ScriptAdapter):
         fname = "{}.sh".format(step.name)
         script_path = os.path.join(ws_path, fname)
         with open(script_path, "w") as script:
-            script.write("#!{0}\n\n{1}\n".format(self._exec, cmd))
+            script.write("{0}\n\n{1}\n".format(self._exec, cmd))
 
         if restart:
             rname = "{}.restart.sh".format(step.name)
             restart_path = os.path.join(ws_path, rname)
 
             with open(restart_path, "w") as script:
-                script.write("#!{0}\n\n{1}\n".format(self._exec, restart))
+                script.write("{0}\n\n{1}\n".format(self._exec, restart))
         else:
             restart_path = None
 

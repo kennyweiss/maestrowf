@@ -109,7 +109,7 @@ class SlurmScriptAdapter(SchedulerScriptAdapter):
         batch_header["job-name"] = step.name.replace(" ", "_")
         batch_header["comment"] = step.description.replace("\n", " ")
 
-        modified_header = ["#!{}".format(self._exec)]
+        modified_header = [self._exec]
         for key, value in self._header.items():
             # If we're looking at the bank and the reservation header exists,
             # skip the bank to prefer the reservation.

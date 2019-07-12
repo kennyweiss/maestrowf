@@ -32,7 +32,7 @@ from abc import ABCMeta, abstractmethod
 import logging
 import os
 import six
-import stat
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ class ScriptAdapter(object):
 
         :param kwargs: The key value arguments for the ScriptAdapter instance.
         """
-        self._exec = kwargs.pop("shell", "/bin/bash")
+        self._exec = os.path.join("#!", kwargs.pop("shell", "/bin/bash"))
         LOGGER.debug("Shell set to '%s'.", self._exec)
 
     @abstractmethod
@@ -71,7 +71,6 @@ class ScriptAdapter(object):
         :returns: The return code of the status query, and a dictionary of job
             identifiers to their status.
         """
-        pass
 
     @abstractmethod
     def cancel_jobs(self, joblist):
@@ -81,7 +80,6 @@ class ScriptAdapter(object):
         :param joblist: A list of job identifiers to be cancelled.
         :returns: The return code to indicate if jobs were cancelled.
         """
-        pass
 
     @abstractmethod
     def _write_script(self, ws_path, step):
@@ -100,7 +98,6 @@ class ScriptAdapter(object):
         :returns: Boolean value (True if the workflow step is to be scheduled,
             False otherwise) and the path to the written script.
         """
-        pass
 
     def write_script(self, ws_path, step):
         """
@@ -141,7 +138,6 @@ class ScriptAdapter(object):
         :param env: A dict containing a modified environment for execution.
         :returns: The return code of the submission command and job identiifer.
         """
-        pass
 
     @property
     @abstractmethod
@@ -152,4 +148,3 @@ class ScriptAdapter(object):
         This is used to register the adapter in the ScriptAdapterFactory
         and when writing the workflow specification.
         """
-        pass
