@@ -261,7 +261,7 @@ class SpectrumFluxScriptAdapter(SchedulerScriptAdapter):
         resp = self.handle.rpc_send("job.submit", json.dumps(jobspec))
 
         # Set the return code and submission code based on the response.
-        sub_code, ret_code = SubmissionCode.ERROR, -1
+        sub_code, ret_code, jobid = SubmissionCode.ERROR, -1, -1
         if resp is None:
             LOGGER.warning("RPC response invalid")
         elif resp.get("errnum", None) is not None:
@@ -273,10 +273,10 @@ class SpectrumFluxScriptAdapter(SchedulerScriptAdapter):
             LOGGER.info("Submission returned status OK. -- "
                         "Assigned identifier (%s)", resp["jobid"])
             # We succeeded in submission here, set the codes appropriately.
-            sub_code, ret_code = SubmissionCode.OK, resp["jobid"]
+            sub_code, ret_code, jobid = SubmissionCode.OK, 0, resp["jobid"]
 
         # Populate a SubmissionRecord to return.
-        sub_record = SubmissionRecord(sub_code, ret_code)
+        sub_record = SubmissionRecord(sub_code, ret_code, jobid)
         return sub_record
 
     def check_jobs(self, joblist):
@@ -683,7 +683,7 @@ class FluxScriptAdapter(SchedulerScriptAdapter):
             self.handle = self.flux.Flux()
 
         resp = self.handle.rpc_send("job.submit", json.dumps(jobspec))
-        submit_code, jobid = SubmissionCode.ERROR, -1
+        submit_code, ret_code, jobid = SubmissionCode.ERROR, -1, -1
 
         if resp is None:
             LOGGER.warning("RPC response invalid")
@@ -695,9 +695,9 @@ class FluxScriptAdapter(SchedulerScriptAdapter):
         else:
             LOGGER.info("Submission returned status OK. -- "
                         "Assigned identifier (%s)", resp["jobid"])
-            submit_code, jobid = SubmissionCode.OK, resp["jobid"]
+            submit_code, ret_code, jobid = SubmissionCode.OK, 0, resp["jobid"]
 
-        return SubmissionRecord(submit_code, jobid)
+        return SubmissionRecord(submit_code, ret_code, jobid)
 
     def check_jobs(self, joblist):
         """
