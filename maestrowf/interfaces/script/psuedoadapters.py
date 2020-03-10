@@ -6,7 +6,6 @@ import logging
 from maestrowf.abstracts.interfaces import ScriptAdapter
 from maestrowf.abstracts.enums import JobStatusCode, State, SubmissionCode, \
     CancelCode
-from maestrowf.interfaces import ScriptAdapterFactory
 from maestrowf.interfaces.script import CancellationRecord, SubmissionRecord
 
 LOGGER = logging.getLogger(__name__)
@@ -33,14 +32,16 @@ class DryRunAdapter(ScriptAdapter):
 
         # Monkey patch in the methods from the appropriate adapter class
         # that would have been executed.
-        adapter_type = kwargs.get("type", "local")
-        self._adapter = ScriptAdapterFactory.get_adapter(adapter_type)
+        from .. import ScriptAdapterFactory
+        adapter_type = kwargs.get("scheduler", "local")
+        self._adapter = \
+            ScriptAdapterFactory.get_adapter(adapter_type)(**kwargs)
 
     def cancel_jobs(self, joblist):
         return CancellationRecord(CancelCode.OK, 0)
 
     def check_jobs(self, joblist):
-        return JobStatusCode.OK, defaultdict(State.FINISHED)
+        return JobStatusCode.OK, defaultdict(lambda: State.FINISHED)
 
     def _write_script(self, ws_path, step):
         return self._adapter._write_script(ws_path, step)
