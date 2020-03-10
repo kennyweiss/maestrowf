@@ -29,15 +29,16 @@
 
 """A script for launching a YAML study specification."""
 from argparse import ArgumentParser, ArgumentError, RawTextHelpFormatter
-from filelock import FileLock, Timeout
 import inspect
 import logging
 import os
 import shutil
-import six
 import sys
-import tabulate
 import time
+
+import six
+import tabulate
+from filelock import FileLock, Timeout
 
 from maestrowf import __version__
 from maestrowf.conductor import monitor_study
@@ -243,20 +244,25 @@ def run_study(args):
     # Write metadata
     study.store_metadata()
 
-    if not spec.batch:
-        exec_dag.set_adapter({"type": "local"})
+    batch = spec.batch
+    if not batch:
+        batch = {"type": "local"}
     else:
-        if "type" not in spec.batch:
-            spec.batch["type"] = "local"
+        if "type" not in batch:
+            batch["type"] = "local"
 
-        exec_dag.set_adapter(spec.batch)
+    # Chceck if the dry run mode is enabled.
+    if args.dryrun:
+        batch["scheduler"] = batch["type"]
+        batch["type"] = "dryrun"
+        LOGGER.info(
+            "----------- DRY RUN MODE ENABLED -----------\n%s",
+            str(batch)
+        )
+    exec_dag.set_adapter(batch)
 
     # Copy the spec to the output directory
     shutil.copy(args.specification, path)
-
-    # Check for a dry run
-    if args.dryrun:
-        raise NotImplementedError("The 'dryrun' mode is in development.")
 
     # Pickle up the DAG
     pkl_path = make_safe_path(path, *["{}.pkl".format(study.name)])
