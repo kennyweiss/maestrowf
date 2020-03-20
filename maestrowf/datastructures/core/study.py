@@ -121,6 +121,20 @@ class StudyStep(SimObject):
         """
         return not self.__eq__(other)
 
+    @property
+    def scheduled(self):
+        """
+        Check if the step will be scheduled.
+
+        :returns: True if the step is to be scheduled, False otherwise.
+        """
+
+        walltime = self.run["walltime"]
+        nodes = self.run["nodes"]
+        procs = self.run["procs"]
+
+        return bool(walltime and (nodes or procs))
+
 
 class Study(DAG):
     """
@@ -166,7 +180,7 @@ class Study(DAG):
     """
 
     def __init__(self, name, description,
-                 studyenv=None, parameters=None, steps=None, out_path="./"):
+                 studyenv=None, parameters=None, out_path="./"):
         """
         Study object used to represent the full workflow of a study.
 
@@ -177,7 +191,6 @@ class Study(DAG):
 
         :param name: String representing the name of the Study.
         :param description: A text description of what the study does.
-        :param steps: A list of StudySteps in proper workflow order.
         :param studyenv: A populated StudyEnvironment instance.
         :param parameters: A populated Parameters instance.
         :param outpath: The path where the output of the study is written.
@@ -217,13 +230,8 @@ class Study(DAG):
         self.used_params = {SOURCE: set()}
         # Combinations seen per step.
         self.step_combos = {SOURCE: set()}
-
-        # If the user specified a flow in the form of steps, copy those into
-        # into the Study object.
-        if steps:
-            for step in steps:
-                # Deep copy because it prevents modifications after the fact.
-                self.add_step(step)
+        # Adapters
+        self.step_adapters = {}
 
     @property
     def output_path(self):
@@ -322,7 +330,7 @@ class Study(DAG):
         self.used_params = metadata["used_parameters"]
         self.step_combos = metadata["step_combinations"]
 
-    def add_step(self, step):
+    def add_step(self, step, adapter):
         """
         Add a step to a study.
 
@@ -332,7 +340,8 @@ class Study(DAG):
         a step. When adding steps out of order it's recommended to just use the
         base class DAG functionality and manually make connections.
 
-         :param step: A StudyStep instance to be added to the Study instance.
+        :param step: A StudyStep instance to be added to the Study instance.
+        :param adapter: String name of the adapter used for the added step.
         """
         # Add the node to the DAG.
         self.add_node(step.name, step)
@@ -357,6 +366,8 @@ class Study(DAG):
         else:
             # Otherwise, if no other dependency, just execute the step.
             self.add_edge(SOURCE, step.name)
+
+        self.step_adapters[step.name] = adapter
 
     def walk_study(self, src=SOURCE):
         """
@@ -482,6 +493,9 @@ class Study(DAG):
             self.depends[step] = set()
             self.step_combos[step] = set()
 
+            # Document the step for use in the expanded set.
+            _adapter = self.step_adapters[step]
+
             s_params = self.parameters.get_used_parameters(node)
             p_params = set()    # Used parameters excluding the current step.
             # Iterate through dependencies to update the p_params
@@ -577,7 +591,7 @@ class Study(DAG):
                 logger.debug("New cmd = %s", cmd)
                 logger.debug("New restart = %s", r_cmd)
 
-                dag.add_step(step, node, workspace, rlimit)
+                dag.add_step(step, node, workspace, _adapter, rlimit)
 
                 if self.depends[step] or self.hub_depends[step]:
                     # So, because we don't have used parameters, we can just
@@ -611,6 +625,7 @@ class Study(DAG):
                     "---------------------------------",
                     step, self.used_params[step]
                 )
+
                 # Now we iterate over the combinations and expand the step.
                 for combo in self.parameters:
                     logger.info("\n**********************************\n"
@@ -678,7 +693,10 @@ class Study(DAG):
                     step_exp.run["cmd"] = cmd
                     step_exp.run["restart"] = r_cmd
                     # Add to the step to the DAG.
-                    dag.add_step(step_exp.name, step_exp, workspace, rlimit)
+                    dag.add_step(
+                        step_exp.name, step_exp, workspace, 
+                        _adapter, rlimit
+                    )
 
                     if self.depends[step] or self.hub_depends[step]:
                         # So, because we don't have used parameters, we can
@@ -732,6 +750,9 @@ class Study(DAG):
                 dag.add_node(SOURCE, None)
                 continue
 
+             # Document the step for use in the expanded set.
+            _adapter = self.step_adapters[step]
+
             # Initialize management structures.
             ws = make_safe_path(self._out_path, *[step])
             self.workspaces[step] = ws
@@ -765,7 +786,7 @@ class Study(DAG):
             node.run["restart"] = r_cmd
 
             # Add the step
-            dag.add_step(step, node, ws, rlimit)
+            dag.add_step(step, node, ws, _adapter, rlimit)
             # If the node does not depend on any other steps, make it so that
             # if connects to SOURCE.
             if not node.run["depends"]:

@@ -30,7 +30,7 @@ class _StepRecord(object):
     step in the DAG.
     """
 
-    def __init__(self, workspace, step, **kwargs):
+    def __init__(self, workspace, step, batch, **kwargs):
         """
         Initialize a new instance of a StepRecord.
 
@@ -40,7 +40,6 @@ class _StepRecord(object):
         jobid: A scheduler assigned job identifier.
         script: The main script used for executing the record.
         restart_script: Script to resume record execution (if applicable).
-        to_be_scheduled: True if the record needs scheduling. False otherwise.
         step: The StudyStep that is represented by the record instance.
         restart_limit: Upper limit on the number of restart attempts.
         tmp_dir: A provided temp directory to write scripts to instead of step
@@ -53,7 +52,6 @@ class _StepRecord(object):
         self.jobid = kwargs.get("jobid", [])
         self.script = kwargs.get("script", "")
         self.restart_script = kwargs.get("restart", "")
-        self.to_be_scheduled = False
         self.step = step
         self.restart_limit = kwargs.get("restart_limit", 3)
 
@@ -91,7 +89,13 @@ class _StepRecord(object):
 
     def execute(self, adapter):
         self.mark_submitted()
-        retcode, jobid = self._execute(adapter, self.script)
+        # If we're not scheduling, go ahead and mark running.
+        # NOTE: This will be changed in the future. A mock scheduler
+        # type local adapter will replace the serial execution adapter.
+        if not self.to_be_scheduled:
+            self.mark_running()
+
+        retcode, jobid = self._execute(self.adapter, self.script)
 
         if retcode == SubmissionCode.OK:
             self.jobid.append(jobid)
@@ -119,15 +123,7 @@ class _StepRecord(object):
         return False
 
     def _execute(self, adapter, script):
-        if self.to_be_scheduled:
-            srecord = adapter.submit(
-                self.step, script, self.workspace.value)
-        else:
-            self.mark_running()
-            ladapter = ScriptAdapterFactory.get_adapter("local")()
-            srecord = ladapter.submit(
-                self.step, script, self.workspace.value)
-
+        srecord = adapter.submit(self.step, script, self.workspace.value)
         retcode = srecord.submission_code
         jobid = srecord.job_identifier
         return retcode, jobid
@@ -374,20 +370,22 @@ class ExecutionGraph(DAG):
         if self._tmp_dir and not os.path.exists(self._tmp_dir):
             self._tmp_dir = tempfile.mkdtemp()
 
-    def add_step(self, name, step, workspace, restart_limit):
+    def add_step(self, name, step, workspace, adapter, restart_limit):
         """
         Add a StepRecord to the ExecutionGraph.
 
         :param name: Name of the step to be added.
         :param step: StudyStep instance to be recorded.
         :param workspace: Directory path for the step's working directory.
+        :param adapter: 
         :param restart_limit: Upper limit on the number of restart attempts.
         """
         data = {
-                    "step": step,
-                    "state": State.INITIALIZED,
-                    "workspace": workspace,
-                    "restart_limit": restart_limit
+                    "step":             step,
+                    "state":            State.INITIALIZED,
+                    "adapter":          adapter,
+                    "workspace":        workspace,
+                    "restart_limit":    restart_limit
                 }
         record = _StepRecord(**data)
         self._dependencies[name] = set()
@@ -402,31 +400,6 @@ class ExecutionGraph(DAG):
         """
         self.add_edge(parent, step)
         self._dependencies[step].add(parent)
-
-    def set_adapter(self, adapter):
-        """
-        Set the adapter used to interface for scheduling tasks.
-
-        :param adapter: Adapter name to be used when launching the graph.
-        """
-        if not adapter:
-            # If we have no adapter specified, assume sequential execution.
-            self._adapter = None
-            return
-
-        if not isinstance(adapter, dict):
-            msg = "Adapter settings must be contained in a dictionary."
-            logger.error(msg)
-            raise TypeError(msg)
-
-        # Check to see that the adapter type is something the
-        if adapter["type"] not in ScriptAdapterFactory.get_valid_adapters():
-            msg = "'{}' adapter must be specfied in ScriptAdapterFactory." \
-                  .format(adapter)
-            logger.error(msg)
-            raise TypeError(msg)
-
-        self._adapter = adapter
 
     def add_description(self, name, description, **kwargs):
         """
